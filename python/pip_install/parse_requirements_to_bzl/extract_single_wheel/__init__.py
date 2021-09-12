@@ -3,12 +3,13 @@ import argparse
 import sys
 import glob
 import subprocess
-import json
 
 from tempfile import NamedTemporaryFile
 
 from python.pip_install.extract_wheels.lib import bazel, requirements, arguments
 from python.pip_install.extract_wheels import configure_reproducible_wheels
+from pip._internal.req import constructors
+from pip._internal.req.req_file import get_line_parser
 
 
 def main() -> None:
@@ -29,13 +30,13 @@ def main() -> None:
     configure_reproducible_wheels()
 
     pip_args = (
-        [sys.executable, "-m", "pip"] +
-        (["--isolated"] if args.isolated else []) + 
-        ["wheel", "--no-deps"] +
-        deserialized_args["extra_pip_args"]
+        [sys.executable, "-m", "pip"]
+        + (["--isolated"] if args.isolated else [])
+        + ["wheel", "--no-deps"]
+        + deserialized_args["extra_pip_args"]
     )
 
-    requirement_file = NamedTemporaryFile(mode='wb', delete=False)
+    requirement_file = NamedTemporaryFile(mode="wb", delete=False)
     try:
         requirement_file.write(args.requirement.encode("utf-8"))
         requirement_file.flush()
@@ -60,12 +61,19 @@ def main() -> None:
     name, extras_for_pkg = requirements._parse_requirement_for_extra(args.requirement)
     extras = {name: extras_for_pkg} if extras_for_pkg and name else dict()
 
-    whl = next(iter(glob.glob("*.whl")))
-    bazel.extract_wheel(
-        whl,
-        extras,
-        deserialized_args["pip_data_exclude"],
-        args.enable_implicit_namespace_pkgs,
-        incremental=True,
-        incremental_repo_prefix=bazel.whl_library_repo_prefix(args.repo)
-    )
+    wheels = glob.glob("*.whl")
+    if wheels:
+        whl = next(iter(glob.glob("*.whl")))
+        bazel.extract_wheel(
+            whl,
+            extras,
+            deserialized_args["pip_data_exclude"],
+            args.enable_implicit_namespace_pkgs,
+            incremental=True,
+            incremental_repo_prefix=bazel.whl_library_repo_prefix(args.repo),
+        )
+    else:
+        line_parser = get_line_parser(finder=None)
+        parsed_line = line_parser(args.requirement)
+        req = constructors.install_req_from_line(parsed_line[0])
+        bazel.emit_blank_wheel(req.name)
